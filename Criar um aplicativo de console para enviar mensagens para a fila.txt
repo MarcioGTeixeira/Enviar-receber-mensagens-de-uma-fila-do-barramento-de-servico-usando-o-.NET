@@ -1,0 +1,180 @@
+https://learn.microsoft.com/pt-br/training/modules/discover-azure-message-queue/6-send-receive-messages-service-bus
+
+
+
+
+1.Abra um terminal local, crie e altere para um diretório chamado az204svcbus e execute o comando para iniciar o Visual Studio Code.
+code .
+
+2.Abra o terminal no VS Code selecionando Terminal > Novo Terminal na barra de menus e execute os comandos a seguir para criar o aplicativo de console e adicionar o pacote Azure.Messaging.ServiceBus.
+dotnet new console
+dotnet add package Azure.Messaging.ServiceBus
+
+3.Em Program.cs, adicione as instruções a seguir using na parte superior do arquivo, após a instrução atual using.
+using System.Threading.Tasks;    
+using Azure.Messaging.ServiceBus;
+
+4.Na classe Program, adicione as duas propriedades estáticas a seguir. Defina a variável ServiceBusConnectionString como a cadeia de conexão que você obteve anteriormente.
+// connection string to your Service Bus namespace
+static string connectionString = "<NAMESPACE CONNECTION STRING>";
+
+// name of your Service Bus topic
+static string queueName = "az204-queue";
+
+5.Declare as propriedades estáticas a seguir na classe Program. Confira os comentários sobre código para obter detalhes.
+// the client that owns the connection and can be used to create senders and receivers
+static ServiceBusClient client;
+
+// the sender used to publish messages to the queue
+static ServiceBusSender sender;
+
+// number of messages to be sent to the queue
+private const int numOfMessages = 3;
+
+6.Substitua o método Main() pelo método asyncMain a seguir.
+static async Task Main()
+    {
+        // Create the clients that we'll use for sending and processing messages.
+        client = new ServiceBusClient(connectionString);
+        sender = client.CreateSender(queueName);
+
+        // create a batch 
+        using ServiceBusMessageBatch messageBatch = await sender.CreateMessageBatchAsync();
+
+        for (int i = 1; i <= 3; i++)
+        {
+            // try adding a message to the batch
+            if (!messageBatch.TryAddMessage(new ServiceBusMessage($"Message {i}")))
+            {
+                // if an exception occurs
+                throw new Exception($"Exception {i} has occurred.");
+            }
+        }
+
+        try 
+        {
+            // Use the producer client to send the batch of messages to the Service Bus queue
+            await sender.SendMessagesAsync(messageBatch);
+            Console.WriteLine($"A batch of {numOfMessages} messages has been published to the queue.");
+        }
+        finally
+        {
+            // Calling DisposeAsync on client types is required to ensure that network
+            // resources and other unmanaged objects are properly cleaned up.
+            await sender.DisposeAsync();
+            await client.DisposeAsync();
+        }
+
+        Console.WriteLine("Press any key to end the application");
+        Console.ReadKey();
+    }
+
+7.Salve o arquivo e execute o comando dotnet build para garantir que não haja erros.
+
+8.Execute o programa e aguarde a mensagem de confirmação.
+A batch of 3 messages has been published to the queue.
+
+
+Faça logon no portal do Azure e navegue até o namespace do Barramento de Serviço. Na página Visão geral, selecione a fila az204-queue no painel inferior central.
+
+Select az204-queue in the bottom-middle pane.
+
+Observe os seguintes valores na seção Essentials:
+
+O valor de contagem de mensagens Ativas da fila agora é 3. Toda vez que você executa esse aplicativo de envio sem recuperar as mensagens, esse valor aumenta em 3.
+O tamanho atual da fila aumenta cada vez que o aplicativo adiciona uma mensagem à fila.
+No gráfico Mensagens da seção inferior Métricas, você pode ver que há três mensagens de entrada na fila.
+Atualizar o projeto para receber mensagens para a fila
+Nesta seção, você modificará o programa para receber mensagens da fila.
+
+Na classe Program, exclua as propriedades estáticas que seguem ServiceBusClient. Continuaremos usando connectionString, queueName e ServiceBusClient para o restante do exercício. Adicione o seguinte após a propriedade estática ServiceBusClient.
+
+C#
+
+Copiar
+// the processor that reads and processes messages from the queue
+static ServiceBusProcessor processor;
+Adicione os seguintes métodos à classe Program para tratar mensagens e quaisquer erros.
+
+C#
+
+Copiar
+// handle received messages
+static async Task MessageHandler(ProcessMessageEventArgs args)
+{
+    string body = args.Message.Body.ToString();
+    Console.WriteLine($"Received: {body}");
+
+    // complete the message. messages is deleted from the queue. 
+    await args.CompleteMessageAsync(args.Message);
+}
+
+// handle any errors when receiving messages
+static Task ErrorHandler(ProcessErrorEventArgs args)
+{
+    Console.WriteLine(args.Exception.ToString());
+    return Task.CompletedTask;
+}
+Substitua o método Main(). Ele cjama o método ReceiveMessages para receber mensagens da fila.
+
+C#
+
+Copiar
+static async Task Main()
+{
+    // Create the client object that will be used to create sender and receiver objects
+    client = new ServiceBusClient(connectionString);
+
+    // create a processor that we can use to process the messages
+    processor = client.CreateProcessor(queueName, new ServiceBusProcessorOptions());
+
+    try
+    {
+        // add handler to process messages
+        processor.ProcessMessageAsync += MessageHandler;
+
+        // add handler to process any errors
+        processor.ProcessErrorAsync += ErrorHandler;
+
+        // start processing 
+        await processor.StartProcessingAsync();
+
+        Console.WriteLine("Wait for a minute and then press any key to end the processing");
+        Console.ReadKey();
+
+        // stop processing 
+        Console.WriteLine("\nStopping the receiver...");
+        await processor.StopProcessingAsync();
+        Console.WriteLine("Stopped receiving messages");
+    }
+    finally
+    {
+        // Calling DisposeAsync on client types is required to ensure that network
+        // resources and other unmanaged objects are properly cleaned up.
+        await processor.DisposeAsync();
+        await client.DisposeAsync();
+    }
+}
+Use o comando dotnet build para garantir que não haja erros.
+
+Use o comando dotnet run para executar o aplicativo. Você verá as mensagens recebidas. Pressione qualquer tecla para interromper o recebimento e o aplicativo.
+
+Bash
+
+Copiar
+Wait for a minute and then press any key to end the processing
+Received: Message 1
+Received: Message 2
+Received: Message 3
+
+Stopping the receiver...
+Stopped receiving messages
+Verifique o portal novamente. Observe que o valor de Contagem de Mensagens Ativas passou para 0. Talvez seja necessário atualizar a página do portal.
+
+Limpar os recursos
+Quando os recursos não forem mais necessários, você poderá usar o comando az group delete no Azure Cloud Shell para remover o grupo de recursos.
+
+Bash
+
+Copiar
+az group delete --name az204-svcbus-rg --no-wait
